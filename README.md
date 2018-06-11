@@ -27,9 +27,8 @@ Create new project by template
 
 #### Params:
 
-**project_path** - Path to new project directory
-
-**template_name** - Name of template / link to git repository / local path
+* **project_path** - Path to new project directory
+* **template_name** - Name of template / link to git repository / local path
     
 #### Examples:
 
