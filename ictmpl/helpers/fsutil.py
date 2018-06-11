@@ -1,5 +1,6 @@
 import os
-from re import compile, sub
+import json
+from re import compile, sub, _pattern_type
 from os.path import abspath, isdir, join
 from shutil import copytree, rmtree
 
@@ -8,6 +9,8 @@ __all__ = ('parse_ignore_file', 'copytree_with_ignore', 'treewalk')
 
 RE_DOUBLESTAR = compile(r'\*\*')
 RE_STAR = compile(r'\*')
+
+RE_IF_CONDITION = compile(r'\s*%\s*(endif|if\s+(.+))\s*%')
 
 
 def parse_ignore_file(filepath):
@@ -94,8 +97,45 @@ def replace_template_file(filepath, app):
     params = app.params
     with open(filepath, 'r') as file:
         filedata = file.read()
-        for key, value in params.items():
-            filedata = sub(r'%%{}%%'.format(key), value, filedata)
+    
+    # replace conditions
+    cut_info = None
+    cond_deep = 0
+    start_index = 0
+    while True:
+        match = RE_IF_CONDITION.search(filedata[start_index:])
+        if not match:
+            break
+        
+        start, end = [start_index+v for v in match.span()]
+        statement = match.group(1)
+        if statement.startswith('if '):
+            cond_deep += 1
+            local = params.copy()
+            exec('result__=bool({})'.format(match.group(2)), local)
+            if local['result__']:
+                filedata = filedata[:start] + filedata[end:]
+                start_index = start
+            elif cut_info is None:
+                cut_info = (start, cond_deep)
+                start_index = end
+        else:
+            if cut_info is not None \
+                    and cut_info[1] is cond_deep:
+                start = cut_info[0]
+                cut_info = None
+            filedata = filedata[:start] + filedata[end:]
+            start_index = start
+    
+    # replace params
+    for key, value in params.items():
+        if isinstance(value, _pattern_type):
+            continue
+        elif value is None or isinstance(value, bool):
+            value = str(value)
+        else:
+            value = json.dumps(value)
+        filedata = sub(r'%%{}%%'.format(key), value, filedata)
     
     with open(filepath, 'w') as file:
         file.write(filedata)
