@@ -1,4 +1,6 @@
 
+class auto(str): pass
+
 
 class Param:
     def __init__(self, name, default, vtype=None, question=None, children=None):
@@ -13,20 +15,30 @@ class Param:
         except:
             pass
         
-        self.question = question + ' '
+        self.question = question.rstrip() + ' '
         self.children = children
         
     def strparse(self, value):
-        if self.vtype is not str and type(value) is self.vtype:
+        if not isinstance(self.vtype, type) and callable(self.vtype):
+            vtype = self.vtype(value)
+        else:
+            vtype = self.vtype
+        
+        if value is 'None':
+            return None
+        
+        if type(value) is vtype:
             return value
         
-        if self.vtype in (list, tuple) \
-                or (self.vtype is str and ',' in value):
+        lvalue = value.lower()
+        if vtype in (list, tuple) \
+                or (vtype is auto and ',' in value):
             return [v.strip() for v in value.split(',') if v.strip()]
-        elif self.vtype is bool:
-            return value[:1].lower() == 'y'
+        elif vtype is bool \
+                or (vtype is auto and lvalue in ('true', 'false')):
+            return lvalue == 'y' or lvalue == 'true'
         
-        return self.vtype(value)
+        return vtype(value)
     
     def format(self, value):
         type_ = type(value)

@@ -1,6 +1,7 @@
 from .param import Param
+from .dependency import SysDep
 
-__all__ = ('Param', )
+__all__ = ('Param', 'SysDep')
 
 if __name__ == '__main__':
     from .config import Config

@@ -1,16 +1,22 @@
+import re
 import os
 import json
-from re import compile, sub, _pattern_type
 from os.path import abspath, isdir, join
 from shutil import copytree, rmtree
 
 __all__ = ('parse_ignore_file', 'copytree_with_ignore', 'treewalk')
 
 
-RE_DOUBLESTAR = compile(r'\*\*')
-RE_STAR = compile(r'\*')
+RE_DOUBLESTAR = re.compile(r'\*\*')
+RE_STAR = re.compile(r'\*')
 
-RE_IF_CONDITION = compile(r'\s*%\s*(endif|if\s+(.+))\s*%')
+RE_IF_CONDITION = re.compile(r"""
+    (?:
+    ^\s*%\s*(else|(?:el(?:se )?)?if\s+(.+))\s*%
+    |
+    \s*%\s*(endif)\s*%
+    )
+    """, re.VERBOSE|re.MULTILINE)
 
 
 def parse_ignore_file(filepath):
@@ -30,7 +36,7 @@ def parse_ignore_file(filepath):
         if line.startswith('/'):
             line = '^'+line
         
-        regexes.append(compile(line))
+        regexes.append(re.compile(line))
     return regexes
 
 
@@ -108,34 +114,62 @@ def replace_template_file(filepath, app):
             break
         
         start, end = [start_index+v for v in match.span()]
-        statement = match.group(1)
+        statement = match.group(1) or match.group(3)
         if statement.startswith('if '):
             cond_deep += 1
+            if cut_info is not None:
+                continue
+            
             local = params.copy()
             exec('result__=bool({})'.format(match.group(2)), local)
             if local['result__']:
                 filedata = filedata[:start] + filedata[end:]
                 start_index = start
-            elif cut_info is None:
+            else:
                 cut_info = (start, cond_deep)
                 start_index = end
-        else:
+        elif statement.startswith('elif ') \
+                 or statement.startswith('else if '):
+            if cut_info is not None:
+                start = cut_info[0]
+                cut_info = None
+            
+                local = params.copy()
+                exec('result__=bool({})'.format(match.group(2)), local)
+                if local['result__']:
+                    filedata = filedata[:start] + filedata[end:]
+                    start_index = start
+                    continue
+            
+            cut_info = (start, cond_deep)
+            start_index = end
+        elif statement.startswith('else') \
+                and not match.group(2):
+            if cut_info is not None:
+                start = cut_info[0]
+                cut_info = None
+                
+            filedata = filedata[:start] + filedata[end:]
+            start_index = start
+                
+        elif statement.startswith('endif'):
             if cut_info is not None \
                     and cut_info[1] is cond_deep:
                 start = cut_info[0]
                 cut_info = None
             filedata = filedata[:start] + filedata[end:]
             start_index = start
+            cond_deep -= 1
     
     # replace params
     for key, value in params.items():
-        if isinstance(value, _pattern_type):
+        if isinstance(value, re._pattern_type):
             continue
         elif value is None or isinstance(value, bool):
             value = str(value)
         else:
             value = json.dumps(value)
-        filedata = sub(r'%%{}%%'.format(key), value, filedata)
+        filedata = re.sub(r'%%{}%%'.format(key), value, filedata)
     
     with open(filepath, 'w') as file:
         file.write(filedata)

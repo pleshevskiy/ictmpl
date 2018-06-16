@@ -7,7 +7,7 @@ from uuid import uuid4
 from textwrap import dedent
 from shutil import rmtree
 
-from ictmpl import Param
+from ictmpl import Param, SysDep
 from ictmpl.helpers.git import Git
 from ictmpl.helpers.fsutil import (
     copytree_with_ignore, rmtree_without_ignore, replace_template_file)
@@ -74,29 +74,19 @@ def create_project(args, app):
         print(e)
         return
     
-    dependencies = rc.get('sysDependencies', None)
-    if dependencies and isinstance(dependencies, dict):
-        commands = []
-        for key, packages in dependencies.items():
-            pipes = Popen('command -v %s' % key, shell=True, stdout=PIPE)
-            stdout, _ = pipes.communicate()
-            if not stdout:
-                commands.append(packages)
-    
-        if commands:
-            # TODO: Need check platform
-            command = 'sudo apt-get install %s' % ' '.join(commands)
-            Popen(command, shell=True)
     
     for key in ('name', 'version', 'description', 'author', 'author_email',
                 'author_website', 'licence'):
         app.params['__{}__'.format(key.upper())] = rc.get(key, '')
     
     params = rc.get('params', [])
-    if params:
+    if params and isinstance(params, (list, tuple)):
         print('Configure template:')
-        ask_params(app, params)
-        print(app.params)
+        try:
+            ask_params(app, params)
+        except KeyboardInterrupt:
+            rmtree(project_path)
+            exit()
         print('------------------\n')
     
         print('Walking files and replace params')
@@ -110,6 +100,29 @@ def create_project(args, app):
             for root, dirs, files in os.walk(project_path):
                 for filename in files:
                     replace_template_file(join(root, filename), app)
+    
+    try:
+        dependencies = rc.get('sys_dependencies', [])
+        if dependencies and isinstance(dependencies, (list, tuple)):
+            packages = ' '.join(
+                sysdep.packages 
+                for sysdep in dependencies
+                if isinstance(sysdep, SysDep) and sysdep.check(app)
+            )
+        
+            if packages:
+                # TODO: Need check platform
+                try:
+                    proc = Popen('sudo apt-get install {}'.format(packages),
+                                 shell=True)
+                    proc.communicate()
+                except KeyboardInterrupt:
+                    proc.kill()
+                    print(os.linesep)
+                    exit()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
     
     setup_command = rc.get('commands', {}).get('setup', None)
     if setup_command:
